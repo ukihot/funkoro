@@ -1,0 +1,5 @@
+/target
+/bevy_gutzgutz/Cargo.lock
+/.vscode/
+.DS_Store
+Thumbs.db

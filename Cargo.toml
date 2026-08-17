@@ -1,0 +1,71 @@
+[package]
+name = "funkoro"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+
+[workspace]
+members = ["bevy_gutzgutz"]
+resolver = "3"
+
+[features]
+# 開発反復時だけBevyを動的リンクし、gutzgutzの開発者向けオーバーレイも含める。
+# リリースビルドは`--features dev`を付けないため、これらは依存グラフから外れる。
+dev = ["bevy/dynamic_linking", "bevy_gutzgutz/devtools"]
+
+[dependencies]
+bevy = { version = "=0.19.1", default-features = false, features = [
+    # Bevyアプリケーションの基本機能
+    "async_executor",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_state",
+    "reflect_auto_register",
+    "std",
+    "multi_threaded",
+    "sysinfo_plugin",
+    # デスクトップウィンドウと入力
+    "bevy_winit",
+    "bevy_clipboard",
+    "default_font",
+    "custom_cursor",
+    "x11",
+    "wayland",
+    "webgl2",
+    # 3Dゲームの標準描画・UI。glTFローダーは使わないため、まとめ feature
+    # `3d_bevy_render`ではなく必要な描画部品だけを明示する。
+    "3d_api",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_gizmos_render",
+    "bevy_anti_alias",
+    "bevy_pbr",
+    "bevy_post_process",
+    "scene",
+    "ui_api",
+    "ui_bevy_render",
+] }
+
+# 共通基盤は常に最小構成で依存する。開発時のdevtoolsは`dev` featureからだけ
+# 加わるため、製品ビルドへ開発用UIが混入しない。
+bevy_gutzgutz = { path = "bevy_gutzgutz", default-features = false, features = ["session"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Bevyは依存側を最適化しないとデバッグ実行時のFPSが大きく落ちる。
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

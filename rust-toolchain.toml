@@ -1,0 +1,5 @@
+[toolchain]
+# `bevy_gutzgutz`とゲーム本体を同じ、再現可能なstable toolchainでビルドする。
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

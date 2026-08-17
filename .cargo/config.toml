@@ -1,0 +1,11 @@
+[alias]
+check-all = "check --workspace --all-targets"
+test-all = "test --workspace --all-targets"
+# 依存クレート自体のlintは行わず、ワークスペースの所有コードだけを警告ゼロで保つ。
+lint = "clippy --workspace --all-targets --no-deps -- -D warnings"
+fmt-check = "fmt --all -- --check"
+run-dev = "run --features dev"
+
+[build]
+# 依存クレートのコンパイルを並列化する。
+jobs = -1

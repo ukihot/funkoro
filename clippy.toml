@@ -1,0 +1,2 @@
+# プロジェクト全体で許容する関数の認知的複雑度。超える処理は小さな関数へ分割する。
+cognitive-complexity-threshold = 20
