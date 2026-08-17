@@ -8,7 +8,7 @@ pub(super) struct Beetle;
 #[derive(Component)]
 pub(super) struct Ball {
     pub(super) radius: f32,
-    pub(super) velocity: Vec3,
+    pub(super) traveled_distance: f32,
 }
 
 #[derive(Component)]
@@ -49,7 +49,8 @@ pub(super) fn setup_world(
     let wall = materials.add(Color::srgb(0.12, 0.055, 0.018));
     let obstacle = materials.add(Color::srgb(0.22, 0.1, 0.026));
     let dung = materials.add(Color::srgb(0.13, 0.055, 0.014));
-    let nest = materials.add(Color::srgb(0.015, 0.008, 0.003));
+    let hole_dark = materials.add(Color::srgb(0.004, 0.001, 0.0));
+    let hole_rim = materials.add(Color::srgb(0.16, 0.065, 0.016));
     let mud = materials.add(Color::srgb(0.08, 0.032, 0.008));
     let limb = materials.add(StandardMaterial {
         base_color: Color::srgb(0.045, 0.018, 0.006),
@@ -96,14 +97,22 @@ pub(super) fn setup_world(
         Mesh3d(meshes.add(Sphere::new(START_BALL_RADIUS).mesh().uv(32, 20))),
         MeshMaterial3d(dung),
         Transform::from_xyz(0.0, START_BALL_RADIUS, -6.5),
-        Ball { radius: START_BALL_RADIUS, velocity: Vec3::ZERO },
+        Ball { radius: START_BALL_RADIUS, traveled_distance: 0.0 },
     ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cylinder::new(1.0, 0.08))),
-        MeshMaterial3d(nest),
-        Transform::from_xyz(0.0, 0.02, 7.5),
-        Nest { hole_radius: 0.74 },
-    ));
+    commands
+        .spawn((Transform::from_xyz(0.0, 0.02, 7.5), Nest { hole_radius: 0.74 }))
+        .with_children(|parent| {
+            parent.spawn((
+                Mesh3d(meshes.add(Cylinder::new(0.84, 0.22))),
+                MeshMaterial3d(hole_dark),
+                Transform::from_xyz(0.0, -0.1, 0.0),
+            ));
+            parent.spawn((
+                Mesh3d(meshes.add(Torus::new(0.84, 1.0))),
+                MeshMaterial3d(hole_rim),
+                Transform::from_xyz(0.0, 0.035, 0.0),
+            ));
+        });
     commands.spawn((
         DirectionalLight { illuminance: 9_000.0, shadow_maps_enabled: true, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -0.5, 0.0)),
