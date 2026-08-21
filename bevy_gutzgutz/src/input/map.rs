@@ -1,21 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::reflect::GetTypeRegistration;
+use leafwing_input_manager::prelude::{ActionState, Actionlike};
 
-use super::source::GutzInputSource;
 use crate::lifecycle::{GutzExecutionContext, GutzLifecycleState};
 
 /// ゲーム側が定義する「プレイヤーが何をしたいか」を表すAction型が満たすべき
-/// 制約をまとめたマーカートレイト。振る舞いの実装は不要（値として使える型
-/// なら自動的に満たされる）。
-///
-/// GutzInputの核心は、`KeyCode`/`MouseButton`/`GamepadButton`を薄くラップ
-/// するのではなく、「Action（プレイヤーの意図）」と「Device（操作手段）」を
-/// 分離すること。ゲーム側はこのAction型だけを見てシステムを書き、実際に
-/// どのキー・ボタンが割り当てられているかは`GutzInputMap`が仲介する。
+/// 制約をまとめたマーカートレイト。leafwing-input-managerの`Actionlike`
+/// （`Reflect`実装が要る）をそのまま要求する——gutzgutzが独自の制約を
+/// 追加で課すことはしない。
 ///
 /// ```ignore
-/// #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// #[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
 /// enum PlayerAction {
 ///     RotateLeft,
 ///     RotateRight,
@@ -24,110 +21,68 @@ use crate::lifecycle::{GutzExecutionContext, GutzLifecycleState};
 /// }
 /// impl GutzAction for PlayerAction {}
 /// ```
-pub trait GutzAction: Copy + Eq + core::hash::Hash + Send + Sync + 'static {}
+pub trait GutzAction: Actionlike + Copy + GetTypeRegistration {}
 
-impl<T: Copy + Eq + core::hash::Hash + Send + Sync + 'static> GutzAction for T {}
+impl<T: Actionlike + Copy + GetTypeRegistration> GutzAction for T {}
 
-/// Action→Deviceのバインディングと、Actionごとの実行コンテキスト制限を持つ
-/// 設定リソース。ゲーム起動時に組み立てるか、[`super::config::GutzInputConfig`]
-/// 経由でTOMLから読み込む。
+/// gutzgutzが内部で保持する、Action入力の実体（leafwingの`InputMap<A>`/
+/// `ActionState<A>`）を持つ唯一のエンティティのマーカー。ゲーム側はこの
+/// エンティティを`Single<&mut InputMap<A>>`（バインド設定時）や
+/// `Single<&ActionState<A>>`（毎フレームの読み取り）でクエリする。
+///
+/// 複数エンティティに分散させない理由：gutzgutzが対象とするのは単一プレイヤー
+/// の「今アクティブな入力」であり、マルチプレイヤーやAI操作エンティティ別の
+/// Action等、per-entity化が必要な場面はleafwing自体を直接使う方が素直
+/// （README.md「早すぎる抽象化はしない」）。
+#[derive(Component)]
+pub struct GutzInputEntity;
+
+/// `action`が有効なのは`context`の間だけ、という制限の一覧。leafwing自体は
+/// Actionの実行コンテキストという概念を持たないため、gutzgutzが足す
+/// 唯一の付加価値がこれ（`crate::input`のモジュールdoc参照）。
+///
+/// 設定しないActionはどの実行コンテキストでも常に評価される。
 #[derive(Resource)]
-pub struct GutzInputMap<A: GutzAction> {
-    bindings: HashMap<A, Vec<GutzInputSource>>,
+pub struct GutzInputContexts<A: GutzAction> {
     contexts: HashMap<A, GutzExecutionContext>,
 }
 
-impl<A: GutzAction> Default for GutzInputMap<A> {
+impl<A: GutzAction> Default for GutzInputContexts<A> {
     fn default() -> Self {
-        Self { bindings: HashMap::default(), contexts: HashMap::default() }
+        Self { contexts: HashMap::default() }
     }
 }
 
-impl<A: GutzAction> GutzInputMap<A> {
-    /// `action`に`source`を追加でバインドする（同じActionに複数のDeviceを
-    /// 割り当てられる。例：Confirmにキーボードとゲームパッドの両方）。
-    pub fn bind(&mut self, action: A, source: GutzInputSource) -> &mut Self {
-        self.bindings.entry(action).or_default().push(source);
-        self
-    }
-
+impl<A: GutzAction> GutzInputContexts<A> {
     /// `action`が有効なのは`context`の間だけ、という制限を追加する
-    /// （doc：「LifecycleによってActionの有効範囲を制御する」）。設定しない
-    /// Actionはどの実行コンテキストでも常に評価される。
+    /// （doc：「LifecycleによってActionの有効範囲を制御する」）。
     pub fn restrict_to(&mut self, action: A, context: GutzExecutionContext) -> &mut Self {
         self.contexts.insert(action, context);
         self
     }
-
-    fn allowed_in(&self, action: &A, current: Option<GutzExecutionContext>) -> bool {
-        match self.contexts.get(action) {
-            Some(required) => Some(*required) == current,
-            None => true,
-        }
-    }
 }
 
-/// 毎フレーム計算される、Action単位の読み取り専用の入力状態。
-/// `KeyCode`等の生の値は一切公開しない——ゲーム側はActionの名前だけを見る。
-#[derive(Resource)]
-pub struct GutzActionState<A: GutzAction> {
-    pressed: HashSet<A>,
-    just_pressed: HashSet<A>,
-    just_released: HashSet<A>,
-}
-
-impl<A: GutzAction> Default for GutzActionState<A> {
-    fn default() -> Self {
-        Self {
-            pressed: HashSet::default(),
-            just_pressed: HashSet::default(),
-            just_released: HashSet::default(),
-        }
-    }
-}
-
-impl<A: GutzAction> GutzActionState<A> {
-    pub fn pressed(&self, action: A) -> bool {
-        self.pressed.contains(&action)
-    }
-
-    pub fn just_pressed(&self, action: A) -> bool {
-        self.just_pressed.contains(&action)
-    }
-
-    pub fn just_released(&self, action: A) -> bool {
-        self.just_released.contains(&action)
-    }
-}
-
-pub(crate) fn update_action_state<A: GutzAction, S: GutzLifecycleState>(
-    map: Res<GutzInputMap<A>>,
-    mut state: ResMut<GutzActionState<A>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    gamepads: Query<&Gamepad>,
+/// `GutzInputContexts`の内容を、[`GutzInputEntity`]が持つ`ActionState<A>`へ
+/// 毎フレーム反映する。leafwingの`ActionState::disable_action`/
+/// `enable_action`をそのまま使い、gutzgutz独自の入力状態は一切保持しない
+/// （旧実装の`GutzActionState`が持っていた`pressed`/`just_pressed`等の
+/// HashSetを毎フレーム再計算する処理は、leafwing本体にそのまま委ねられる）。
+///
+/// leafwingの`InputManagerSystem::Update`（実入力→`ActionState`反映）の
+/// 直後に実行する必要がある——先に無効化してしまうと、その後の
+/// `update_action_state`が実入力で上書きしてしまい、コンテキスト制限が
+/// 1フレーム遅れて効いているように見える。
+pub(crate) fn apply_context_restrictions<A: GutzAction, S: GutzLifecycleState>(
+    restrictions: Res<GutzInputContexts<A>>,
     current_state: Option<Res<State<S>>>,
+    mut action_state: Single<&mut ActionState<A>, With<GutzInputEntity>>,
 ) {
-    state.pressed.clear();
-    state.just_pressed.clear();
-    state.just_released.clear();
-
-    let context = current_state.map(|s| s.get().execution_context());
-
-    for (action, sources) in map.bindings.iter() {
-        if !map.allowed_in(action, context) {
-            continue;
-        }
-        for source in sources {
-            if source.pressed(&keyboard, &mouse, &gamepads) {
-                state.pressed.insert(*action);
-            }
-            if source.just_pressed(&keyboard, &mouse, &gamepads) {
-                state.just_pressed.insert(*action);
-            }
-            if source.just_released(&keyboard, &mouse, &gamepads) {
-                state.just_released.insert(*action);
-            }
+    let context = current_state.map(|state| state.get().execution_context());
+    for (action, required) in restrictions.contexts.iter() {
+        if Some(*required) == context {
+            action_state.enable_action(action);
+        } else {
+            action_state.disable_action(action);
         }
     }
 }

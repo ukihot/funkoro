@@ -97,9 +97,10 @@ impl<S: GutzLifecycleState, A: GutzAction, U: GutzUiScreen, D: GutzSaveData> Plu
 #[cfg(test)]
 mod tests {
     use bevy::state::app::StatesPlugin;
+    use leafwing_input_manager::Actionlike;
 
     use super::*;
-    use crate::input::{GutzActionState, GutzInputMap};
+    use crate::input::{ActionState, GutzInputContexts, GutzInputEntity, InputMap};
     use crate::lifecycle::GutzExecutionContext;
     use crate::save::{GutzLoadRequest, GutzSaveRequest};
     use crate::ui::{GutzUiScreenClosed, GutzUiScreenOpened, GutzUiStack};
@@ -116,7 +117,7 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Actionlike, Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect)]
     enum TestAction {
         Confirm,
     }
@@ -140,8 +141,17 @@ mod tests {
 
         let _ = (TestAction::Confirm, TestScreen::Pause);
 
-        assert!(app.world().contains_resource::<GutzInputMap<TestAction>>());
-        assert!(app.world().contains_resource::<GutzActionState<TestAction>>());
+        assert!(app.world().contains_resource::<GutzInputContexts<TestAction>>());
+        let mut input_entities = app.world_mut().query_filtered::<Entity, (
+            With<GutzInputEntity>,
+            With<InputMap<TestAction>>,
+            With<ActionState<TestAction>>,
+        )>();
+        assert_eq!(
+            input_entities.iter(app.world()).count(),
+            1,
+            "GutzInputPlugin should spawn exactly one entity holding InputMap/ActionState"
+        );
         assert!(app.world().contains_resource::<GutzUiStack<TestScreen>>());
         assert!(app.world().contains_resource::<crate::lifecycle::GutzPaused>());
         assert!(app.world().contains_resource::<Messages<GutzUiScreenOpened<TestScreen>>>());

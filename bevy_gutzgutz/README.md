@@ -103,11 +103,21 @@ app.add_plugins(GutzGameSessionPlugin::<GameState, PlayerAction, UiScreen, SaveD
 Physics Debugトグル（Avian3Dの`PhysicsDebugPlugin`を薄く配線するだけ）・
 Time Scale・God Mode・Spawn Entity（登録した生成関数を一覧して呼び出す）・
 Skip Level/Reload Sceneフック（`GutzDevtoolsEvent`を発行するだけで、実際の
-遷移処理はゲーム側が購読して実装する）・Screenshotを持つ。
+遷移処理はゲーム側が購読して実装する）・Screenshot・World Inspector
+（`bevy-inspector-egui`の`ui_for_world`をそのまま呼ぶだけの、Entity/Resource
+生ブラウザ）を持つ。
 
 任意のゲーム固有デバッグ値は`GutzDebugStats`（`set(key, value)`で上書きする
 汎用チャンネル）経由でオーバーレイに載せられる。`devtools` feature自体を
-落とせば、`bevy_egui`依存ごとリリースビルドから消せる。
+落とせば、`bevy_egui`/`bevy-inspector-egui`依存ごとリリースビルドから消せる。
+
+FPS/Frame Time/Screenshotのような小さな機能を自前実装のまま残しているのは
+意図的な判断。Bevy公式の`bevy_dev_tools`にも同等機能（`fps_overlay`等）が
+あるが、そちらはeguiではなく`bevy_ui`で直接描画する別レンダリング経路の
+ため、ここへ混ぜると見た目・トグルキーの一貫性が崩れる。一方World
+Inspectorのような「Entity/Resourceを丸ごと閲覧する」機能は自前実装が
+割に合わない領域かつ、`bevy-inspector-egui`は既存のeguiコンテキストへ
+そのまま同居できるため、そこだけ採用している。
 
 ### `interaction` — `GutzInteractionPlugin`
 
@@ -326,28 +336,56 @@ app.add_plugins(GutzLifeCyclePlugin::<GameState>::default());
 
 ### `input` — `GutzInputPlugin<A, S>`
 
-「Action」と「Device」の分離。`keyboard.pressed(KeyCode::KeyW)`のような
-生入力をそのまま薄くラップすることは**しない**——それはBevyのAPIを隠して
-いるだけで価値が薄い。核心は3点：
+Action/Deviceの分離、複数デバイスの同時バインド、入力のclash解決は
+[leafwing-input-manager](https://docs.rs/leafwing-input-manager)へ委ねる
+（Bevy/Avian3D本体を薄くラップしない、という既存方針を`input`自体にも
+適用した。以前は`keyboard.pressed(KeyCode::KeyW)`相当を自前でラップして
+いたが、その大半は既にこのcrateが高品質に解決している領域だった）。
+gutzgutzが独自に足すのは1点だけ：
 
-1. プレイヤーが何をしたいか（`GutzAction`）と、何のデバイスで操作したか
-   （`GutzInputSource`：Key/MouseButton/GamepadButton）を分離する
-2. デバイスではなくActionを抽象化する（ゲーム側は`GutzActionState`経由で
-   `pressed(Action::Fire)`のように見る）
-3. `lifecycle`によってActionの有効範囲（実行コンテキスト）を制御する
-   （`GutzInputMap::restrict_to(action, GutzExecutionContext::InGame)`）
+- `lifecycle`によってActionの有効範囲（実行コンテキスト）を制御する
+  （`GutzInputContexts::restrict_to(action, GutzExecutionContext::InGame)`）。
+  leafwing自体は「このActionはタイトル画面では無効」のような概念を持たない
 
 ```rust
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Actionlike, Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
 enum PlayerAction { RotateLeft, RotateRight, Charge, Restart }
 
 app.add_plugins(GutzInputPlugin::<PlayerAction, GameState>::default());
+
+fn configure_controls(
+    mut input_map: Single<&mut InputMap<PlayerAction>>,
+    mut contexts: ResMut<GutzInputContexts<PlayerAction>>,
+) {
+    input_map.insert(PlayerAction::RotateLeft, KeyCode::KeyA);
+    contexts.restrict_to(PlayerAction::RotateLeft, GutzExecutionContext::InGame);
+}
+
+fn steer(actions: Single<&ActionState<PlayerAction>>) {
+    if actions.pressed(&PlayerAction::RotateLeft) { /* ... */ }
+}
 ```
 
+`InputMap<A>`/`ActionState<A>`はいずれもleafwingの型で、gutzgutzが
+唯一spawnする`GutzInputEntity`というエンティティが持つComponent。
+`bevy_gutzgutz::input`が`leafwing_input_manager`の必要な型
+（`Actionlike`/`InputMap`/`ActionState`）を再エクスポートしているため、
+通常の`use`は`bevy_gutzgutz::input::{...}`だけで済む（`steam`モジュールが
+`bevy-steamworks`を`sdk`として再エクスポートするのと同じ形）。
+
+ただし`#[derive(Actionlike)]`だけは例外——`proc-macro-crate`が
+「呼び出し元crate自身のCargo.tomlに`leafwing_input_manager`という直接
+依存があるか」を見てコード生成するため、Action型を定義するゲーム側は
+`leafwing-input-manager`を薄い直接依存として持つ必要がある
+（`default-features = false`でよい。featureはgutzgutz側の指定とCargoの
+feature統合で自動的に揃う）。
+
 バインディングはTOML設定ファイルから読み込める（`load_into`/
-`load_into_from_file`）。gutzgutzはゲームのAction型の文字列表現を知らない
-ため、名前解決は呼び出し側の関数で行う。未知のアクション名・Device名は
-警告ログを出してスキップする（typoでゲーム全体が起動不能になるのを防ぐ）。
+`load_into_from_file`。leafwing自身のシリアライズ形式ではなく、gutzgutzの
+素朴な形式を維持している）。gutzgutzはゲームのAction型の文字列表現を
+知らないため、名前解決は呼び出し側の関数で行う。未知のアクション名・
+Device名は警告ログを出してスキップする（typoでゲーム全体が起動不能に
+なるのを防ぐ）。
 
 ```toml
 [bindings]
@@ -391,11 +429,19 @@ spawn_modal_panel(&mut commands, GutzModalPanelStyle::default())
 
 ### `save` — `GutzSavePlugin<T>`
 
-「セーブファイル」ではなく「ゲーム状態の永続化」。Saveはゲーム状態を
-ディスクへ出し入れするための**インフラ**であり、ゲームロジックそのものを
-知らない。**セーブデータと実行中のWorldを分離する**——gutzgutzは生きている
-`World`から何を保存するか決めたり、読み込んだ値を勝手に`World`へ書き戻し
-たりしない。
+「セーブファイル」ではなく「ゲーム進行状態の永続化」。Saveはゲーム進行
+状態をディスクへ出し入れするための**インフラ**であり、ゲームロジックその
+ものを知らない。**セーブデータと実行中のWorldを分離する**——gutzgutzは
+生きている`World`から何を保存するか決めたり、読み込んだ値を勝手に
+`World`へ書き戻したりしない。
+
+**スコープ外：ユーザー設定**（音量・表示・キーバインド等）。これは
+Bevy 0.19が公式に持つ`bevy::settings`（`SettingsPlugin`/
+`#[derive(SettingsGroup)]`）を使うこと。「ハイスコアやステージ進行は
+ゲームの状態」に対し「音量はプレイヤー環境の好み」で意味的に別物な上、
+Bevy側が公式に同じ問題（読み込み・保存・保存先解決）をカバーするように
+なった以上、gutzgutzが薄いラッパーを重ねる価値はない。`GutzSaveData`は
+「ゲームを再開したときに復元したい進行データ」だけに使うこと。
 
 ゲーム側は保存したいデータを1つのplain-oldな型（`serde`実装）として定義し、
 保存したい時に値そのものを`GutzSaveRequest`へ積んで送り、読み込んだ結果は
@@ -539,7 +585,9 @@ commands.entity(camera).insert(Msaa::Off);
 ### `audio` — 未着手
 
 現在は「`app.add_plugins(...)`で差し込める」骨組みのみを用意している。
-再生方式・ミキサー・設定保存の契約が定まった段階で実装する。
+再生方式・ミキサーの契約が定まった段階で実装する。音量設定の永続化は
+`GutzSavePlugin`ではなくBevy公式の`bevy::settings`へ委ねる方針（`save`
+節参照）——実装時にここへ専用の設定永続化機構を新設しないこと。
 
 ## 非機能要件
 

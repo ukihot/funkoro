@@ -6,6 +6,7 @@ mod ui;
 
 use bevy::prelude::*;
 use bevy_gutzgutz::{
+    input::Actionlike,
     lifecycle::{GutzExecutionContext, GutzLifecycleState, in_game},
     session::GutzGameSessionPlugin,
 };
@@ -36,7 +37,7 @@ impl GutzLifecycleState for GameState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Actionlike, Clone, Copy, Debug, Eq, Hash, PartialEq, Reflect)]
 pub(super) enum BeetleAction {
     PushBackward,
     TurnLeft,

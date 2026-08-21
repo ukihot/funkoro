@@ -8,7 +8,14 @@ edition = "2024"
 # 落とせるようにする。
 [features]
 default = []
-devtools = ["dep:bevy_egui", "bevy/bevy_render", "bevy/bevy_window"]
+# bevy-inspector-egui（Entity/Resourceの生インスペクタ）は既存のbevy_egui
+# オーバーレイへ同居させるため、専用サブfeatureに分けず devtools 本体へ含める
+# （Avian3D専用のdevtools-physics3dとは違い、特定ジャンルのゲームにしか
+# 要らない機能ではなく、devtoolsという括りそのものの基本機能のため）。
+# default-features=falseにし、`ui_for_world`/`ui_for_resource`等の手動UI
+# 関数はbevy-inspector-egui側の`2d`/`3d`/`bevy`（gizmo等）featureに依存しない
+# ため、それらは有効化しない。
+devtools = ["dep:bevy_egui", "dep:bevy-inspector-egui", "bevy/bevy_render", "bevy/bevy_window"]
 # devtoolsのうち、Avian3D専用のPhysics Debug（BVH/軸/Raycast/接触点の
 # gizmo描画）だけを切り出したサブfeature。Avian2Dのゲームなど、そもそも
 # avian3dを使わない消費側がdevtoolsを有効化すると、Avian3D側のリソースが
@@ -23,11 +30,20 @@ lifecycle = ["bevy/bevy_state"]
 # lifecycle・input・ui・saveを一方向に配線する合成プラグインを公開する。
 # 各機能を個別に使いたいゲームは、従来どおり下位featureだけを有効化してよい。
 session = ["lifecycle", "input", "ui", "save"]
-# GutzInputPlugin。Actionの実行コンテキスト制限にlifecycleの型を使うため
-# 依存する。TOMLバインディング設定の読み込みにserde/tomlを使う。
+# GutzInputPlugin。Action/Device分離・複数デバイスの束ね・clash解決は
+# leafwing-input-managerに委ね、gutzgutzはActionの実行コンテキスト制限
+# （lifecycleの型を使う）だけを足す薄いレイヤーにする（車輪の再発明をしない、
+# という既存方針をinput自体にも適用）。TOMLバインディング設定の読み込みには
+# 引き続きserde/tomlを使う（leafwing自身のシリアライズ形式ではなく、
+# gutzgutzの素朴な`[bindings] rotate_left = ["KeyA"]`形式を維持するため）。
 # keyboard/mouse/gamepadは消費側ゲームの設定に依存させず、gutzgutz自身が
-# 自己完結して要求する（devtools/interactionと同じ方針）。
-input = ["lifecycle", "dep:serde", "dep:toml", "bevy/keyboard", "bevy/mouse", "bevy/gamepad", "bevy/bevy_log"]
+# 自己完結して要求する（devtools/interactionと同じ方針）。gamepadは
+# leafwing側のgamepad featureが`bevy/bevy_gilrs`（実デバイスからの入力
+# バックエンド）を要求する——旧実装は`bevy/gamepad`（型のみ）しか要求して
+# おらず、`Query<&Gamepad>`が常に空でGamepadButtonバインドは実質無効化
+# していた（気づかれていなかった潜在バグ）。leafwing採用によりここが
+# 初めて実際に機能するようになる。
+input = ["lifecycle", "dep:leafwing-input-manager", "dep:serde", "dep:toml", "bevy/keyboard", "bevy/mouse", "bevy/gamepad", "bevy/bevy_log"]
 # GutzUiPlugin（画面スタック）＋モーダルパネルビルダー（`Node`/`BackgroundColor`
 # を使うため`bevy/bevy_ui`が必要）。
 ui = ["bevy/bevy_ui"]
@@ -63,8 +79,12 @@ atlas-build = ["dep:image", "dep:serde", "dep:toml", "dep:thiserror"]
 
 [dependencies]
 # dirty_wayのCargo.tomlと同じ0.19.0系に固定。default-features=falseとし、
-# 必要なサブfeatureは各gutzgutz featureから `bevy/xxx` で個別に有効化する
-# （bevy_gilrsを巻き込まないため）。`reflect_auto_register`だけは常時
+# 必要なサブfeatureは各gutzgutz featureから `bevy/xxx` で個別に有効化する。
+# 以前は「bevy_gilrsを巻き込まない」ためにgamepadは型（`bevy/gamepad`）だけ
+# 有効化していたが、その状態では`Query<&Gamepad>`が常に空でGamepadButton
+# バインドが実質無効だった（`input` feature側のコメント参照）。leafwing側の
+# `gamepad` featureが`bevy/bevy_gilrs`を要求するため、`input` feature経由では
+# 現在はbevy_gilrsが入る。`reflect_auto_register`だけは常時
 # 有効にする——`bevy_reflect`側のstdlib型向け実装（`impl_reflect_opaque!`）が
 # 無条件にこのfeatureを要求しており、無効のままだと`bevy`をどんな
 # 組み合わせで使ってもビルドが通らない（例：`atlas-build`のように
@@ -76,10 +96,31 @@ bevy = { version = "0.19.0", default-features = false, features = ["reflect_auto
 # devtools-physics3d（Physics Debugトグル）とinteraction（raycast/grab/
 # explosion/impulse）の両方から使う共有依存。dirty_wayと同じ0.7.0系。
 avian3d = { version = "0.7.0", optional = true }
-bevy_egui = { version = "0.41.1", optional = true }
+# bevy-inspector-egui 0.37がbevy_egui ^0.40.0に固定しているため、gutzgutz側の
+# バージョンもそれに一致させている（=で完全固定）。単に上げると2種類の
+# bevy_egui（＝2種類のegui）が依存グラフに同時に乗り、EguiContexts等の型が
+# 噛み合わなくなる（実際に0.41.1のまま試して確認済み）。bevy-inspector-egui
+# の対応版が上がったら、ここも合わせて追従すること。
+bevy_egui = { version = "=0.40.1", optional = true }
+# GutzDevtoolsPluginへ「Entity/Resourceの生インスペクタ」を足すためだけに使う。
+# `ui_for_world`/`ui_for_resource`等の手動UI関数は`2d`/`3d`（gizmo等、
+# エディタ用ビューポート機能）に依存しないため、default-featuresは切って
+# 何も足さない（devtools-physics3d/atlas-sprite2dと同じ「重い/限定的な依存は
+# 引き込まない」方針）。
+bevy-inspector-egui = { version = "0.37", optional = true, default-features = false }
 # input（TOMLバインディング設定）とsave（TOMLセーブデータ）が共有する依存。
 serde = { version = "1", features = ["derive"], optional = true }
 toml = { version = "1.1.4", optional = true }
+# GutzInputPlugin。Action/Device分離・複数デバイスの同時バインド・入力の
+# clash解決は自前実装せず、Bevy 0.19対応済みのこのcrateへ委ねる
+# （bevy-steamworksと同じ「既存の優良crateを薄く採用する」方針）。
+# `asset`（InputMapをBevyアセットとしてロードする機能）と`picking`
+# （bevy_pickingとの連携）はgutzgutzの用途では不要なため外す。
+leafwing-input-manager = { version = "0.21", optional = true, default-features = false, features = [
+    "keyboard",
+    "mouse",
+    "gamepad",
+] }
 # GutzSteamPlugin。Client Resource化・コールバックの毎フレームポンプという
 # ボイラープレートは既にこのcrateが解決してくれているので、gutzgutzが
 # 薄く再発明する意味は無い（Bevy/Avian3D本体を薄くラップしない、という

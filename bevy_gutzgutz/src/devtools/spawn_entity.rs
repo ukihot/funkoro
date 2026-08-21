@@ -1,11 +1,14 @@
 use bevy::prelude::*;
 
+/// 1つの登録済み生成関数。「名前」と「呼び出し可能なクロージャ」の対。
+type SpawnFn = Box<dyn Fn(&mut Commands, Vec3) + Send + Sync>;
+
 /// devtoolsの「その場で任意エンティティを生成する」機能のレジストリ。
 /// ゲーム側が`register`で生成関数を登録し、gutzgutz側は名前の一覧表示と
 /// 呼び出しだけを担当する。gutzgutzはゲームのプレファブ構造を一切知らない。
 #[derive(Resource, Default)]
 pub struct GutzSpawnRegistry {
-    entries: Vec<(String, Box<dyn Fn(&mut Commands, Vec3) + Send + Sync>)>,
+    entries: Vec<(String, SpawnFn)>,
 }
 
 impl GutzSpawnRegistry {

@@ -50,6 +50,15 @@ bevy = { version = "=0.19.1", default-features = false, features = [
 # 加わるため、製品ビルドへ開発用UIが混入しない。
 bevy_gutzgutz = { path = "bevy_gutzgutz", default-features = false, features = ["session"] }
 serde = { version = "1.0", features = ["derive"] }
+# `BeetleAction`に`#[derive(Actionlike)]`を使うためだけの薄い直接依存。
+# 実行時の型（ActionState/InputMap）はbevy_gutzgutz::input経由で使うため
+# 通常はこのcrateを直接importする必要はないが、`Actionlike`のderiveマクロは
+# `proc-macro-crate`で「呼び出し元crate自身がleafwing_input_managerに直接
+# 依存しているか」を見てコード生成する（再エクスポート越しでは検出されない）
+# ため、これだけは例外的にここへ書く必要がある
+# （bevy_gutzgutz/src/input.rsのモジュールdoc参照）。featureは
+# bevy_gutzgutz側の指定とCargoのfeature統合で自動的に揃うため空でよい。
+leafwing-input-manager = { version = "0.21", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

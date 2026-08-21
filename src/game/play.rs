@@ -1,5 +1,5 @@
 use bevy::{input::mouse::MouseMotion, prelude::*};
-use bevy_gutzgutz::{input::GutzActionState, save::GutzSaveRequest, ui::GutzUiStack};
+use bevy_gutzgutz::{input::ActionState, save::GutzSaveRequest, ui::GutzUiStack};
 
 use super::{
     ARENA_HALF_SIZE, BEETLE_RADIUS, BeetleAction, ClearScore, GameState, HoleLayout,
@@ -10,7 +10,7 @@ use super::{
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn update_beetle(
     time: Res<Time>,
-    actions: Res<GutzActionState<BeetleAction>>,
+    actions: Single<&ActionState<BeetleAction>>,
     mut mouse_motion: MessageReader<MouseMotion>,
     mut beetle: Single<
         (&mut Transform, &mut LookAngles, &mut Projection),
@@ -33,8 +33,8 @@ pub(super) fn update_beetle(
         perspective.fov = 1.35_f32.lerp(0.72, visual_growth);
     }
 
-    let turn = f32::from(actions.pressed(BeetleAction::TurnRight))
-        - f32::from(actions.pressed(BeetleAction::TurnLeft));
+    let turn = f32::from(actions.pressed(&BeetleAction::TurnRight))
+        - f32::from(actions.pressed(&BeetleAction::TurnLeft));
     look.yaw -= turn * time.delta_secs() * 1.9;
     transform.rotation = Quat::from_rotation_y(look.yaw) * Quat::from_rotation_x(look.pitch);
 
@@ -42,7 +42,7 @@ pub(super) fn update_beetle(
     // フンコロガシの後脚で玉を巣穴方向へ押し込む唯一の移動操作になる。
     let movement = Quat::from_rotation_y(look.yaw)
         * Vec3::Z
-        * f32::from(actions.pressed(BeetleAction::PushBackward));
+        * f32::from(actions.pressed(&BeetleAction::PushBackward));
     if movement.length_squared() == 0.0 {
         return;
     }
@@ -62,11 +62,11 @@ pub(super) fn update_beetle(
 }
 
 pub(super) fn open_menu(
-    actions: Res<GutzActionState<BeetleAction>>,
+    actions: Single<&ActionState<BeetleAction>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut screens: ResMut<GutzUiStack<UiScreen>>,
 ) {
-    if actions.just_pressed(BeetleAction::OpenMenu) {
+    if actions.just_pressed(&BeetleAction::OpenMenu) {
         next_state.set(GameState::Menu);
         screens.push(UiScreen::Menu);
     }
@@ -121,14 +121,14 @@ pub(super) fn roll_ball(
 
 #[allow(clippy::type_complexity)]
 pub(super) fn reset_stage(
-    actions: Res<GutzActionState<BeetleAction>>,
+    actions: Single<&ActionState<BeetleAction>>,
     progress: Res<PuzzleProgress>,
     mut run_layout: ResMut<RunLayout>,
     mut ball: Single<(&mut Transform, &mut Ball), Without<Beetle>>,
     mut nest: Single<(&mut Transform, &mut Nest), (Without<Ball>, Without<Beetle>)>,
     mut beetle: Single<(&mut Transform, &mut LookAngles), (With<Beetle>, Without<Ball>)>,
 ) {
-    if actions.just_pressed(BeetleAction::ResetStage) {
+    if actions.just_pressed(&BeetleAction::ResetStage) {
         place_stage(&progress, &mut run_layout, false, &mut ball, &mut nest, &mut beetle);
     }
 }

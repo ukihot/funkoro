@@ -1,14 +1,23 @@
 //! FPS/Physics Debug/Spawn Entity/Time Scale/Skip Level/God Mode/Reload Scene/
-//! Screenshotの8機能を提供する開発者向けオーバーレイ。表示はeguiで行い、
-//! 本番プレイヤー向けUI（bevy_ui）とは実装方式ごと分離する。`devtools`
-//! featureを外せばリリースビルドの依存グラフから完全に消える。
+//! Screenshot/World Inspectorの9機能を提供する開発者向けオーバーレイ。表示は
+//! eguiで行い、本番プレイヤー向けUI（bevy_ui）とは実装方式ごと分離する。
+//! `devtools` featureを外せばリリースビルドの依存グラフから完全に消える。
 //!
 //! "Level"や"Scene再構築"はゲームごとに構造が異なるため、gutzgutzは
 //! `GutzDevtoolsEvent`の発行だけに留め、実際の処理はゲーム側が
 //! `MessageReader<GutzDevtoolsEvent>`で購読して実装する（フック方式）。
+//!
+//! FPS表示・Screenshotのような小さな機能を自前実装のまま残しているのは
+//! 手抜きではなく意図的な判断——`bevy_dev_tools`の同等機能（fps_overlay等）
+//! はeguiではなく`bevy_ui`で直接描画する別レンダリング経路のため、ここへ
+//! 混ぜると見た目・トグルキーの一貫性が崩れる。一方、Entity/Resourceの
+//! 生インスペクタ（[`inspector`]）は自前実装が割に合わない領域かつ
+//! `bevy-inspector-egui`が既存のeguiコンテキストへそのまま同居できるため、
+//! そこだけ採用している。
 
 mod fps;
 mod god_mode;
+mod inspector;
 #[cfg(feature = "devtools-physics3d")]
 mod physics_debug;
 mod screenshot;
@@ -23,6 +32,7 @@ use bevy::prelude::*;
 use bevy::time::Virtual;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 pub use god_mode::GutzGodMode;
+pub use inspector::GutzInspectorVisible;
 pub use screenshot::take_screenshot;
 pub use spawn_entity::GutzSpawnRegistry;
 pub use stats::GutzDebugStats;
@@ -76,6 +86,7 @@ impl Plugin for GutzDevtoolsPlugin {
             .init_resource::<GutzDebugStats>()
             .init_resource::<GutzGodMode>()
             .init_resource::<GutzSpawnRegistry>()
+            .init_resource::<GutzInspectorVisible>()
             .add_message::<GutzDevtoolsEvent>()
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
             .add_plugins(EguiPlugin::default());
@@ -94,7 +105,11 @@ impl Plugin for GutzDevtoolsPlugin {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            draw_overlay.run_if(|visible: Res<GutzDevtoolsVisible>| visible.0),
+            (
+                draw_overlay.run_if(|visible: Res<GutzDevtoolsVisible>| visible.0),
+                inspector::draw_world_inspector
+                    .run_if(|visible: Res<GutzInspectorVisible>| visible.0),
+            ),
         );
     }
 }
@@ -119,6 +134,7 @@ fn draw_overlay(
     registry: Res<GutzSpawnRegistry>,
     mut commands: Commands,
     mut selected_spawn: Local<usize>,
+    mut inspector_visible: ResMut<GutzInspectorVisible>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else { return };
 
@@ -137,6 +153,7 @@ fn draw_overlay(
         });
 
         ui.checkbox(&mut god_mode.0, "God Mode");
+        ui.checkbox(&mut inspector_visible.0, "World Inspector");
 
         ui.horizontal(|ui| {
             if ui.button("Skip Level").clicked() {

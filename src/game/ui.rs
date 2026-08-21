@@ -3,7 +3,7 @@ use bevy::{
     window::{CursorGrabMode, CursorOptions},
 };
 use bevy_gutzgutz::{
-    input::{GutzActionState, GutzInputMap, GutzInputSource},
+    input::{ActionState, GutzInputContexts, InputMap},
     lifecycle::GutzExecutionContext,
     ui::{
         GutzModalPanelStyle, GutzUiScreenClosed, GutzUiScreenOpened, GutzUiStack, spawn_modal_panel,
@@ -25,9 +25,11 @@ pub(super) struct HoleHud;
 #[derive(Component)]
 pub(super) struct TiltHud;
 
-pub(super) fn configure_controls(mut input_map: ResMut<GutzInputMap<BeetleAction>>) {
+pub(super) fn configure_controls(
+    mut input_map: Single<&mut InputMap<BeetleAction>>,
+    mut contexts: ResMut<GutzInputContexts<BeetleAction>>,
+) {
     use BeetleAction::*;
-    use GutzInputSource::Key;
 
     for (action, key) in [
         (PushBackward, KeyCode::KeyS),
@@ -36,12 +38,12 @@ pub(super) fn configure_controls(mut input_map: ResMut<GutzInputMap<BeetleAction
         (ResetStage, KeyCode::KeyR),
         (OpenMenu, KeyCode::Escape),
     ] {
-        input_map.bind(action, Key(key)).restrict_to(action, GutzExecutionContext::InGame);
+        input_map.insert(action, key);
+        contexts.restrict_to(action, GutzExecutionContext::InGame);
     }
-    input_map
-        .bind(Start, Key(KeyCode::Enter))
-        .bind(Start, Key(KeyCode::Space))
-        .restrict_to(Start, GutzExecutionContext::OutGame);
+    input_map.insert(Start, KeyCode::Enter);
+    input_map.insert(Start, KeyCode::Space);
+    contexts.restrict_to(Start, GutzExecutionContext::OutGame);
 }
 
 pub(super) fn open_title_screen(mut screens: ResMut<GutzUiStack<UiScreen>>) {
@@ -69,7 +71,7 @@ pub(super) fn setup_hud(mut commands: Commands) {
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn start_from_menu(
-    actions: Res<GutzActionState<BeetleAction>>,
+    actions: Single<&ActionState<BeetleAction>>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut screens: ResMut<GutzUiStack<UiScreen>>,
@@ -84,7 +86,7 @@ pub(super) fn start_from_menu(
     mut commands: Commands,
     mut hud: Query<&mut Visibility, Or<(With<HoleHud>, With<TiltHud>)>>,
 ) {
-    if !actions.just_pressed(BeetleAction::Start) {
+    if !actions.just_pressed(&BeetleAction::Start) {
         return;
     }
     if *state.get() != GameState::Menu {

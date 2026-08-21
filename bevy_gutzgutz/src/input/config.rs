@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use super::map::{GutzAction, GutzInputMap};
-use super::source::GutzInputSource;
+use leafwing_input_manager::prelude::InputMap;
+
+use super::map::GutzAction;
+use super::source::parse_buttonlike;
 
 /// TOML設定ファイルの生の形。1アクション名につき、割り当てたいDeviceの
 /// 名前を複数並べる。
@@ -20,15 +22,16 @@ struct GutzInputConfigToml {
 }
 
 /// TOML文字列を読み込み、`resolve_action`でアクション名（文字列）をゲーム側の
-/// Action型へ変換しながら`map`へバインディングを追加する。gutzgutzはゲーム
-/// のAction型の文字列表現を一切知らないため、変換方法は呼び出し側に委ねる。
+/// Action型へ変換しながら`map`（leafwingの`InputMap<A>`）へバインディングを
+/// 追加する。gutzgutzはゲームのAction型の文字列表現を一切知らないため、
+/// 変換方法は呼び出し側に委ねる。
 ///
 /// 解決できないアクション名・Device名は警告ログを出してスキップする
 /// （設定ファイルの typo でゲーム全体が起動不能になるのを避ける）。
 ///
 /// ```ignore
-/// let mut map = GutzInputMap::<PlayerAction>::default();
-/// gutz_input::load_into(&mut map, toml_str, |name| match name {
+/// let mut input_map: Single<&mut InputMap<PlayerAction>> = ...;
+/// bevy_gutzgutz::input::load_into(&mut input_map, toml_str, |name| match name {
 ///     "rotate_left" => Some(PlayerAction::RotateLeft),
 ///     "rotate_right" => Some(PlayerAction::RotateRight),
 ///     "charge" => Some(PlayerAction::Charge),
@@ -37,7 +40,7 @@ struct GutzInputConfigToml {
 /// })?;
 /// ```
 pub fn load_into<A: GutzAction>(
-    map: &mut GutzInputMap<A>,
+    map: &mut InputMap<A>,
     toml_str: &str,
     resolve_action: impl Fn(&str) -> Option<A>,
 ) -> Result<(), toml::de::Error> {
@@ -49,13 +52,13 @@ pub fn load_into<A: GutzAction>(
             continue;
         };
         for source_name in source_names {
-            let Some(source) = GutzInputSource::parse(&source_name) else {
+            let Some(button) = parse_buttonlike(&source_name) else {
                 bevy::log::warn!(
                     "gutzgutz input config: unknown input source '{source_name}' for action '{action_name}', skipping"
                 );
                 continue;
             };
-            map.bind(action, source);
+            map.insert_boxed(action, button);
         }
     }
 
@@ -65,7 +68,7 @@ pub fn load_into<A: GutzAction>(
 /// ファイルパスから読み込む版。ファイルI/Oエラーは`std::io::Error`として、
 /// パース/未知アクションのエラーは`ErrorKind::InvalidData`に詰めて返す。
 pub fn load_into_from_file<A: GutzAction>(
-    map: &mut GutzInputMap<A>,
+    map: &mut InputMap<A>,
     path: impl AsRef<std::path::Path>,
     resolve_action: impl Fn(&str) -> Option<A>,
 ) -> std::io::Result<()> {
